@@ -1,0 +1,104 @@
+---
+title: "Treatment Effect Estimation"
+format: html
+editor: visual
+---
+
+```{r}
+#| label: libraries
+
+library(tidyverse)
+library(here)
+library(haven)
+```
+
+This dataset contains the CHOICES 51 participants and their corresponding treatment
+
+```{r}
+enroll_choices <- read_csv(
+  here("Data", "CHOICES", "RCT", "ENROLL.csv")
+)
+```
+
+This dataset contains the Drug and Alcohol Use Data from the RCT (ASD)
+
+```{r}
+asd_choices <- read_csv(
+  here("Data", "CHOICES", "RCT", "ASD.csv")
+)
+```
+
+## Treatment Effect Estimation for Alcohol Use
+
+Treatment Effect Dataset
+
+```{r}
+treatment_data <- asd_choices |>
+  inner_join(enroll_choices, by = c("PROT", "PATID", "SITE", "RANDDT")) 
+
+treatment_data|>
+  group_by(PATID) |>
+  count()
+```
+
+Treatment Effect Estimation
+
+```{r}
+# Using t-test here but want to officially use rank based test
+
+t.test(ADALA30D ~ TRTTRUE, data = treatment_data)
+```
+
+## Archive
+
+This dataset contains the CHOICES lab.
+
+```{r}
+lab_choices <- read_csv(
+  here("Data", "CHOICES", "RCT", "LAB.csv")
+)
+
+lab_choices <- lab_choices |>
+  inner_join(enroll_choices, by = c("PROT", "PATID", "SITE", "RANDDT")) |>
+  select(names(lab_choices))
+```
+
+Creating new dataset for response variable
+
+```{r}
+# CD4
+
+week_0 <- treatment_data %>% filter(VISNO == "00") %>% select(PATID, CD4_0 = LACD4CNT)
+week_16 <- treatment_data %>% filter(VISNO == "16") %>% select(PATID, CD4_16 = LACD4CNT)
+
+response_vars <- week_0 %>%
+  inner_join(week_16, by = "PATID") %>%
+  mutate(CD4_CHANGE = CD4_16 - CD4_0) %>%
+  select(PATID, CD4_CHANGE)
+```
+
+```{r}
+full_data <- response_vars |>
+  inner_join(enroll_choices, by = c("PATID")) 
+```
+
+Treatment Effect Estimation
+
+```{r}
+t.test(CD4_CHANGE ~ TRTTRUE, data = full_data) ##full data different
+```
+
+```{r}
+full_data |>
+  filter(TRTTRUE == "XR-NTX")
+```
+
+validation
+
+```{r}
+treatment_data |>
+  filter(VISNO == "00",
+         TRTTRUE == "XR-NTX") |>
+  summarize(mean = mean(LACD4CNT, na.rm = TRUE))
+
+```

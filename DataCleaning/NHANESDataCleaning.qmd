@@ -1,0 +1,195 @@
+---
+title: "NHANES Data Cleaning"
+format: html
+editor: visual
+---
+
+```{r}
+#| label: libraries
+
+library(tidyverse)
+library(here)
+library(haven)
+```
+
+```{r}
+alc_aux <- read_xpt(
+  here("Data", "NHANES", "2015-2016", "Questionnaire", "ALQ_I.xpt"))
+```
+
+```{r}
+# new variable reflicts drinking frequency per year
+alc_aux <- alc_aux |>
+  mutate(
+    # Estimate number of drinking days in past 30 days
+    drinking_days_past_30 = case_when(
+      ALQ120U == 1 ~ ALQ120Q * 4.345,  # Weekly drinking converted to monthly
+      ALQ120U == 2 ~ ALQ120Q,          # Monthly drinking remains as is
+      ALQ120U == 3 ~ ALQ120Q / 12,     # Yearly drinking converted to monthly
+      TRUE ~ NA_real_                   # Assign NA if data is missing
+    ),
+
+    # Assign NA if person was not asked the alcohol use questions
+    drinking_days_past_30 = case_when(
+      ALQ101 == 2 ~ NA_real_,  # Never drank in any year → NA
+      ALQ101 %in% c(7, 9) ~ NA_real_,  # Refused or Don't know → NA
+      ALQ120Q %in% c(777, 999) ~ NA_real_,  # Refused or Don't know in ALQ120Q → NA
+      TRUE ~ drinking_days_past_30
+    ),
+    # temp var - Calculate annual frequency of alcohol consumption
+    annual_drinking_days = case_when(
+      ALQ120U == 1 ~ ALQ120Q * 52,    # Weekly: 52 weeks per year
+      ALQ120U == 2 ~ ALQ120Q * 12,    # Monthly: 12 months per year
+      ALQ120U == 3 ~ ALQ120Q,         # Yearly: already per year
+      TRUE ~ 0                        # Default to 0 if not specified
+    ),
+    
+    # new binary variable for alcohol
+    ALQ120_binary = case_when(
+      ALQ101 == 1 & annual_drinking_days > 0 ~ 1,  # Drank in the past year
+      ALQ101 == 1 & annual_drinking_days == 0 ~ 0, # Did not drink in the past year
+      ALQ101 == 2 ~ 0,                             # Never had 12 drinks in any year
+      ALQ101 %in% c(7, 9) ~ NA_real_,              # Refused or Don't know
+      TRUE ~ NA_real_                              # Catch-all for any other cases
+    )
+  )
+
+alc_names <- c("drinking_days_past_30", "ALQ120_binary")
+```
+
+```{r}
+blood_aux <- read_xpt(
+  here("Data", "NHANES", "2015-2016", "Laboratory", "CBC_I.xpt"))
+
+blood_names <- c("LBDNENO", "LBXHGB", "LBXHCT", "LBXPLTSI", "LBXWBCSI", 
+                 "LBXRBCSI")
+```
+
+```{r}
+cardio_aux <- read_xpt(
+  here("Data", "NHANES", "2015-2016", "Questionnaire", "CDQ_I.xpt"))
+
+cardio_names <- "CDQ001"
+```
+
+```{r}
+medcond_aux <- read_xpt(
+  here("Data", "NHANES", "2015-2016", "Questionnaire", "MCQ_I.xpt"))
+
+medcond_names <- "MCQ160L"
+```
+
+```{r}
+biochem_aux <- read_xpt(
+  here("Data", "NHANES", "2015-2016", "Laboratory", "BIOPRO_I.xpt"))
+
+biochem_names <- c("LBXSASSI", "LBXSATSI")
+```
+
+```{r}
+weight_aux <- read_xpt(
+  here("Data", "NHANES", "2015-2016", "Questionnaire", "WHQ_I.xpt"))
+
+weight_names <- c("WHD010", "WHD020")
+```
+
+```{r}
+bp_aux <- read_xpt(
+  here("Data", "NHANES", "2015-2016", "Examination", "BPX_I.xpt"))
+```
+
+```{r}
+bp_aux <- bp_aux |>
+  mutate(
+    BPXSY_avg = rowMeans(across(c(BPXSY1, BPXSY2, BPXSY3))),
+    BPXDI_avg = rowMeans(across(c(BPXDI1, BPXDI2, BPXDI3)))
+  )
+  
+bp_names <- c("BPXSY_avg", "BPXDI_avg")
+```
+
+```{r}
+smoking_aux <- read_xpt(
+  here("Data", "NHANES", "2015-2016", "Questionnaire", "SMQ_I.xpt"))
+
+smoking_names <- c("SMQ020", "SMD030", "SMD641")
+```
+
+```{r}
+drug_aux <- read_xpt(
+  here("Data", "NHANES", "2015-2016", "Questionnaire", "DUQ_I.xpt"))
+```
+
+```{r}
+drug_aux <- drug_aux |>
+  mutate(
+    # temp var - Convert time since last use to months for marijuana
+    time_since_last_use_months = case_when(
+      DUQ220U == 1 ~ DUQ220Q / 30.44,  # Days to months
+      DUQ220U == 2 ~ DUQ220Q / 4.345,  # Weeks to months
+      DUQ220U == 3 ~ DUQ220Q,          # Months
+      DUQ220U == 4 ~ DUQ220Q * 12,     # Years to months
+      TRUE ~ NA_real_
+    ),
+    # new binary variable for marijuanna
+    DUQ215_binary = case_when(
+      DUQ200 == 1 & !is.na(time_since_last_use_months) & time_since_last_use_months <= 12 ~ 1,
+      DUQ200 == 1 & (is.na(time_since_last_use_months) | time_since_last_use_months > 12) ~ 0,
+      DUQ200 == 2 ~ 0,  # Never used marijuana
+      TRUE ~ NA_real_  # Catch-all for any other cases
+    ),
+    # temp var - Convert time since last use to months
+    time_since_last_use_months = case_when(
+      DUQ270U == 1 ~ DUQ270Q / 30.44,  # Days to months
+      DUQ270U == 2 ~ DUQ270Q / 4.345,  # Weeks to months
+      DUQ270U == 3 ~ DUQ270Q,          # Months
+      DUQ270U == 4 ~ DUQ270Q * 12,     # Years to months
+      TRUE ~ NA_real_
+    ),
+    
+    # new binary variable for cocaine
+    DUQ270_binary = case_when(
+      DUQ240 == 1 & DUQ250 == 1 & !is.na(time_since_last_use_months) & time_since_last_use_months <= 12 ~ 1,
+      DUQ240 == 1 & DUQ250 == 1 & (is.na(time_since_last_use_months) | time_since_last_use_months > 12) ~ 0,
+      DUQ240 == 2 ~ 0,  # Never used cocaine, heroin, or methamphetamine
+      TRUE ~ NA_real_  # Catch-all for any other cases
+    )
+  )
+
+drug_names <- c("DUQ215_binary", "DUQ270_binary")
+```
+
+```{r}
+demo_aux <- read_xpt(
+  here("Data", "NHANES", "2015-2016", "Demographics", "DEMO_I.xpt"))
+
+demo_names <- c("RIAGENDR", "DMDEDUC2", "DMDMARTL")
+```
+
+```{r}
+aux <- alc_aux |>
+  inner_join(blood_aux, by = "SEQN") |>
+  inner_join(cardio_aux, by = "SEQN") |>
+  inner_join(medcond_aux, by = "SEQN") |>
+  inner_join(biochem_aux, by = "SEQN") |>
+  inner_join(weight_aux, by = "SEQN") |>
+  inner_join(bp_aux, by = "SEQN") |>
+  inner_join(smoking_aux, by = "SEQN") |>
+  inner_join(drug_aux, by = "SEQN") |>
+  inner_join(demo_aux, by = "SEQN") |>
+  select(
+    SEQN,
+    all_of(alc_names),
+    all_of(blood_names), 
+    all_of(cardio_names),
+    all_of(medcond_names),
+    all_of(biochem_names),
+    all_of(weight_names),
+    all_of(bp_names),
+    all_of(smoking_names),
+    all_of(drug_names),
+    all_of(demo_names))
+
+aux <- aux |>
+  filter(!is.na(drinking_days_past_30))
+```

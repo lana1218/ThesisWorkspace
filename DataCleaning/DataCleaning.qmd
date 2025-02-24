@@ -1,0 +1,53 @@
+---
+title: "Data Cleaning"
+format: html
+editor: visual
+---
+
+```{r}
+#| label: libraries
+
+library(tidyverse)
+library(here)
+library(haven)
+```
+
+This dataset contains the CHOICES 51 participants and their corresponding treatment
+
+```{r}
+enroll_choices <- read_csv(
+  here("Data", "CHOICES", "RCT", "ENROLL.csv")
+)
+```
+
+This dataset contains the NHANES demographics from 2015-2016.
+
+```{r}
+demo_2015_to_2016 <- read_xpt(
+  here("Data", "NHANES", "2015-2016", "Demographics", "DEMO_I.xpt"))
+```
+
+This dataset contains the CHOICES demographics.
+
+```{r}
+demo_choices <- read_csv(
+  here("Data", "CHOICES", "RCT", "DEM.csv")
+)
+
+demo_choices <- demo_choices |>
+  inner_join(enroll_choices, by = c("PROT", "PATID", "SITE", "RANDDT")) |>
+  select(names(demo_choices))
+```
+
+```{r}
+demo_choices |>
+  group_by(PATID) |>
+  count()
+
+length(unique(demo_choices$PATID))
+```
+
+```{r}
+aux_demo_2015_to_2016 <- demo_2015_to_2016 |>
+  select(SEQN, RIAGENDR, RIDAGEYR, RIDRETH3, DMDEDUC2, DMDMARTL)
+```

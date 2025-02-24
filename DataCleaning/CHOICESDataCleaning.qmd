@@ -1,0 +1,155 @@
+---
+title: "CHOICES Data Cleaning"
+format: html
+editor: visual
+---
+
+```{r}
+#| label: libraries
+
+library(tidyverse)
+library(here)
+```
+
+```{r}
+demo_rct <- read_csv(
+  here("Data", "CHOICES", "RCT", "DEM.csv"))
+
+demo_rct <- demo_rct |>
+  mutate(
+    DEGENDER = as.factor(DEGENDER),
+    DEEDUCTN_recode = case_when(
+      DEEDUCTN %in% c(5, 6, 7, 8) ~ 1,  # Less than 9th grade (5th-8th grade)
+      DEEDUCTN %in% c(9, 10, 11, 12) ~ 2, # 9-12th grade, no diploma
+      DEEDUCTN %in% c(13, 14) ~ 3,  # High school graduate / GED
+      DEEDUCTN %in% c(15, 16, 17) ~ 4,  # Some college or AA degree
+      DEEDUCTN == 18 ~ 5,  # College graduate or above
+      DEEDUCTN %in% c(19, 20, 21) ~ 5,  # Advanced degrees (Master’s, Professional, Doctorate)
+      DEEDUCTN == 97 ~ 9,  # Don't know
+      DEEDUCTN == 98 ~ 7,  # Refused
+      TRUE ~ NA_real_  # Default to NA for any unexpected cases
+    ),
+    
+  )
+
+demo_names <- c("DEGENDER", "DEEDUCTN_recode", "DEMARTL")
+```
+
+```{r}
+hist_rct <- read_csv(
+  here("Data", "CHOICES", "RCT", "MHX.csv"))
+
+hist_rct <- hist_rct |>
+  mutate(across(c(MHCARDH, MHLIVRH), as.factor))
+
+hist_names <- c("MHCARDH", "MHLIVRH")
+```
+
+```{r}
+lab_rct <- read_csv(
+  here("Data", "CHOICES", "RCT", "LAB.csv"))
+
+# took lab at before treatment time
+lab_rct <- lab_rct |>
+  filter(VISNO == "S1")
+
+lab_names <- c("LANEUTRO", "LAHEMGLB", "LAHEMATC", "LAPLATES", "LAWBC", "LARBC", 
+               "LAAST", "LAALT")
+```
+
+```{r}
+vis_rct <- read_csv(
+  here("Data", "CHOICES", "RCT", "VIS.csv"))
+
+# took vis at before treatment time
+vis_rct <- vis_rct |>
+  filter(VISNO == "S1")
+
+vis_names <- c("VIHGTIN", "VIWTLBS", "VIBPSYS1", "VIBPDIS1")
+```
+
+```{r}
+dsm_rct <- read_csv(
+  here("Data", "CHOICES", "RCT", "DSM.csv"))
+
+dsm_rct <- dsm_rct |>
+  mutate(across(c(DSALC12M, DSTHC12M, DSCOC12M), as.factor))
+
+dsm_names <- c("DSALC12M", "DSTHC12M", "DSCOC12M")
+```
+
+```{r}
+tuh_rct <- read_csv(
+  here("Data", "CHOICES", "RCT", "TUH.csv"))
+
+tuh_rct <- tuh_rct |>
+  filter(VISNO == "S2") |>
+  mutate(across(c(TUSMK100), as.factor))
+
+tuh_names <- c("TUSMK100", "TUSTRTRG", "TU30DAYS")
+```
+
+```{r}
+asd_rct <- read_csv(
+  here("Data", "CHOICES", "RCT", "ASD.csv")
+)
+
+asd_names <- c("VISNO", "ADALA30D")
+```
+```{r}
+## treatment type
+
+enroll_rct <- read_csv(
+  here("Data", "CHOICES", "RCT", "ENROLL.csv")
+)
+
+enroll_names <- "TRTTRUE"
+```
+
+
+```{r}
+rct <- demo_rct |>
+  inner_join(hist_rct, by = c("PROT", "PATID", "SITE", "RANDDT")) |>
+  inner_join(lab_rct, by = c("PROT", "PATID", "SITE", "RANDDT")) |>
+  inner_join(vis_rct, by = c("PROT", "PATID", "SITE", "RANDDT")) |>
+  inner_join(dsm_rct, by = c("PROT", "PATID", "SITE", "RANDDT")) |>
+  inner_join(tuh_rct, by = c("PROT", "PATID", "SITE", "RANDDT")) |>
+  inner_join(enroll_rct, by = c("PROT", "PATID", "SITE", "RANDDT")) |>
+  select(
+    all_of(c("PROT", "PATID", "SITE", "RANDDT")),
+    all_of(demo_names),
+    all_of(hist_names),
+    all_of(lab_names),
+    all_of(vis_names),
+    all_of(dsm_names),
+    all_of(tuh_names),
+    all_of(enroll_names)
+  ) 
+
+# getting pre and post treatment alcohol use
+rct <- asd_rct |>
+  left_join(rct, by = c("PROT", "PATID", "SITE", "RANDDT")) |>
+    select(
+    all_of(c("PROT", "PATID", "SITE", "RANDDT")),
+    all_of(asd_names),
+    all_of(demo_names),
+    all_of(hist_names),
+    all_of(lab_names),
+    all_of(vis_names),
+    all_of(dsm_names),
+    all_of(tuh_names),
+    all_of(enroll_names)
+  ) |>
+  # ensures that all rows has a pre and post treatment score
+  group_by(PATID) |>
+  filter(n() >1) |>
+  ungroup() |>
+  pivot_wider(
+    names_from = VISNO,
+    values_from = ADALA30D,
+    names_prefix = "alcohol_"
+  ) |>
+  # reorder columns
+  select(PROT, PATID, SITE, RANDDT, TRTTRUE, alcohol_S2, alcohol_16, everything())
+
+```
