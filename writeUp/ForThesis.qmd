@@ -1,0 +1,140 @@
+---
+title: "ForThesis"
+format: html
+---
+
+```{r}
+library(tidyverse)
+library(here)
+library(ggpubr)
+library(patchwork)
+```
+
+```{r}
+load(here("Data", "rct.RData"))
+
+load(here("Data", "aux.RData"))
+```
+
+```{r}
+rct <- rct |>
+  rename(drinking_days_past_30 = alcohol_16)
+```
+## Histogram of Variables
+```{r}
+factor_vars <- c(
+  "DEGENDER",
+  "DEEDUCTN_recode",
+  "DEMARTL",
+  "MHCARDH",
+  "MHLIVRH",
+  "DSALC12M",
+  "DSTHC12M",
+  "DSCOC12M",
+  "TUSMK100"
+)
+
+aux <- aux |>
+  mutate(across(all_of(factor_vars), as.factor))
+
+rct <- rct |>
+  mutate(across(all_of(factor_vars), as.factor))
+
+aux$Source <- "NHANES"
+rct$Source <- "RCT"
+
+combined <- bind_rows(aux, rct)
+```
+
+```{r}
+p1 <- ggplot(combined, aes(x = LARBC, color = Source, fill = Source)) +
+  geom_density(alpha = 0.3) +
+  theme_minimal() +
+  labs(x = "Red blood cell count",
+       y = "Density")
+
+p1
+```
+
+
+```{r}
+p2 <- ggplot(combined, aes(x = VIBPDIS1, color = Source, fill = Source)) +
+  geom_density(alpha = 0.3) +
+  theme_minimal() +
+  theme(axis.title.y = element_blank()) +
+  labs(x = "Average blood pressure: (diastolic)")
+
+p2
+```
+
+
+```{r}
+p3 <- ggplot(combined, aes(x = VIBPSYS1, color = Source, fill = Source)) +
+  geom_density(alpha = 0.3) +
+  theme_minimal() +
+  labs(x = "Average blood pressure (Systolic)",
+       y = "Density")
+
+p3
+```
+
+```{r}
+p4 <- ggplot(combined, aes(x = LAPLATES, color = Source, fill = Source)) +
+  geom_density(alpha = 0.3) +
+  theme_minimal() +
+  theme(axis.title.y = element_blank()) +
+  labs(x = "Platelet count")
+
+p4
+```
+
+```{r}
+final_plot <- (p1 + p2) / (p3 + p4) +
+  plot_layout(guides = "collect") +                  
+  theme(legend.position = "bottom") +                 
+  plot_annotation(
+    title = "Comparison of Quantitative Covariates Between NHANES and RCT",
+    subtitle = "Overlay of distributions to assess covariate balance"
+  )
+
+final_plot
+```
+
+
+```{r}
+cat_vars <- c("DSALC12M")  # replace with your variable names
+
+long_cat <- combined %>%
+  select(all_of(cat_vars), Source) %>%
+  pivot_longer(cols = all_of(cat_vars), names_to = "variable", values_to = "category") %>%
+  filter(!is.na(category))  # remove missing if needed
+
+prop_data <- long_cat %>%
+  group_by(Source, variable, category) %>%
+  summarise(n = n(), .groups = "drop") %>%
+  group_by(Source, variable) %>%
+  mutate(prop = n / sum(n))
+
+prop_data$category <- ifelse(prop_data$category == 1, "Yes", "No")
+```
+
+```{r}
+ggplot(prop_data, aes(x = category, y = prop, fill = Source)) +
+  geom_col(position = "dodge", alpha = 0.7) +
+  labs(x = "Alcohol past 12 months", 
+       y = "Proportion",
+       title = "Comparison of Past 12 Month Alcohol Use Rate Across NHANES and RCT Participants") +
+  theme_minimal()
+```
+
+```{r}
+p5 <- ggplot(combined, aes(x = drinking_days_past_30, color = Source, fill = Source)) +
+  geom_density(alpha = 0.3) +
+  theme_minimal() +
+  theme(axis.title.y = element_blank()) +
+  labs(x = "Number of drinking days in the past 30 days",
+       title = "Comparison of Past 30 Day Alcohol Use Rate \nAcross NHANES and RCT Participants")
+
+p5
+```
+

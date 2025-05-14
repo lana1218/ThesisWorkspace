@@ -1,0 +1,107 @@
+---
+title: "RFonRCT"
+format: html
+---
+
+Let's fit same random forest on rct to see if the same variable importance.
+
+```{r}
+library(tidyverse)
+library(tidymodels)
+library(here)
+library(vip)
+```
+
+```{r}
+load(here("Data", "rct.RData"))
+```
+
+```{r}
+factor_vars <- c(
+  "DEGENDER",
+  "DEEDUCTN_recode",
+  "DEMARTL",
+  "MHCARDH",
+  "MHLIVRH",
+  "DSALC12M",
+  "DSTHC12M",
+  "DSCOC12M",
+  "TUSMK100"
+)
+
+rct <- rct |>
+  mutate(across(all_of(factor_vars), as.factor)) |>
+  rename(drinking_days_past_30 = alcohol_16)
+```
+
+
+```{r}
+rct <- rct |>
+  select(-c(PROT, SITE, RANDDT, pred, TRTTRUE, alcohol_S2))
+```
+
+
+```{r}
+set.seed(123)
+
+aux_recipe <- recipe(drinking_days_past_30 ~ ., data = rct) |>
+  update_role(PATID, new_role = "ID")
+
+rf_mod_final <- rand_forest(
+  mtry = 3,
+  trees = 500,
+  min_n = 6) %>%
+  set_engine("ranger", importance = "impurity") %>%
+  set_mode("regression")
+
+rf_mod_final_fit <- workflow() %>%
+  add_model(rf_mod_final) %>%
+  add_recipe(aux_recipe) %>%
+  fit(rct)
+
+extract_fit_parsnip(rf_mod_final_fit) 
+```
+
+## VIP
+
+```{r}
+name_map <- c(
+  DEGENDER = "Gender",
+  DEEDUCTN_recode = "Education Level",
+  DEMARTL = "Marital Status",
+  MHCARDH = "Chest Pain History",
+  MHLIVRH = "Liver Condition History",
+  LANEUTRO = "Segmented Neutrophils",
+  LAHEMGLB = "Hemoglobin",
+  LAHEMATC = "Hematocrit %",
+  LAPLATES = "Platelet Count",
+  LAWBC = "White Blood Cell Count",
+  LARBC = "Red Blood Cell Count",
+  LAAST = "Aspartate Aminotransferase",
+  LAALT = "Alanine Aminotransferase",
+  VIHGTIN = "Height",
+  VIWTLBS = "Weight",
+  VIBPSYS1 = "Systolic Blood Pressure",
+  VIBPDIS1 = "Diastolic Blood Pressure",
+  DSALC12M = "Alcohol Use Past 12 Months",
+  DSTHC12M = "Cannabis Use Past 12 Months",
+  DSCOC12M = "Cocaine Use Past 12 Months",
+  TUSMK100 = "Ever Smoked 100 Cigarettes",
+  TU30DAYS = "Days Smoked Past 30 Days",
+  TUSTRTRG = "Age Started Smoking"
+)
+
+imp_data <- vi(extract_fit_parsnip(rf_mod_final_fit)$fit)
+
+imp_data <- imp_data %>%
+  mutate(Variable = recode(.data$Variable, !!!name_map))
+```
+
+```{r}
+ggplot(imp_data, aes(x = Importance, y = reorder(Variable, Importance))) +
+  geom_col(fill = "lightblue",
+           color = "black",
+           width = 1) +
+  labs(y = NULL, x = "Importance") +
+  theme_minimal()
+```

@@ -1,0 +1,257 @@
+---
+title: "Auxiliary Model"
+format: html
+editor: visual
+---
+
+```{r}
+library(tidyverse)
+library(tidymodels)
+library(here)
+library(vip)
+```
+
+```{r}
+load(here("Data", "rct.RData"))
+
+load(here("Data", "aux.RData"))
+aux <- haven::zap_labels(aux) # need to strip attributes so that it won't interfere with recipes
+```
+
+```{r}
+factor_vars <- c(
+  "DEGENDER",
+  "DEEDUCTN_recode",
+  "DEMARTL",
+  "MHCARDH",
+  "MHLIVRH",
+  "DSALC12M",
+  "DSTHC12M",
+  "DSCOC12M",
+  "TUSMK100"
+)
+
+aux <- aux |>
+  mutate(across(all_of(factor_vars), as.factor))
+
+rct <- rct |>
+  mutate(across(all_of(factor_vars), as.factor))
+```
+
+## Random Forest
+
+```{r}
+set.seed(123)
+
+aux_cv <- vfold_cv(aux, 5)
+
+rf_grid <- grid_regular(mtry(c(3, 9)),
+                        min_n(c(2, 10)),
+                        trees(c(100, 500)),
+                        levels = 3)
+
+rf_spec <- rand_forest(mtry = tune(),
+                       min_n = tune(),
+                       trees = tune()) %>%
+  set_engine("ranger") %>%
+  set_mode("regression")
+
+aux_recipe <- recipe(drinking_days_past_30 ~ ., data = aux) |>
+  update_role(SEQN, new_role = "ID")
+
+
+aux_rf_wflow <- workflow() %>%
+  add_model(rf_spec) %>%
+  add_recipe(aux_recipe)
+
+aux_rf_fit <- aux_rf_wflow %>%
+  tune_grid(
+    grid = rf_grid,
+    resamples = aux_cv
+    )
+
+```
+
+```{r}
+aux_rf_fit %>% 
+  collect_metrics()
+
+show_best(aux_rf_fit, metric = "rmse", n = 5)
+show_best(aux_rf_fit, metric = "rsq", n = 5)
+
+# best hyperparameters: mtry = 3, trees = 500, min_n = 6
+```
+
+```{r}
+#| label: final-model-fit
+
+rf_mod_final <- rand_forest(
+  mtry = 3,
+  trees = 500,
+  min_n = 6) %>%
+  set_engine("ranger", importance = "impurity") %>%
+  set_mode("regression")
+
+rf_mod_final_fit <- workflow() %>%
+  add_model(rf_mod_final) %>%
+  add_recipe(aux_recipe) %>%
+  fit(aux)
+
+extract_fit_parsnip(rf_mod_final_fit) 
+```
+
+## Random Forest using Scaled Variables
+
+```{r}
+numeric_vars <- names(aux)[sapply(aux, is.numeric)]
+
+numeric_vars <- setdiff(numeric_vars, c("SEQN", "drinking_days_past_30"))
+
+aux_scaled <- aux %>%
+  mutate(across(all_of(numeric_vars), ~ as.numeric(scale(.x, scale = TRUE))))
+```
+
+```{r}
+set.seed(123)
+
+aux_scaled_cv <- vfold_cv(aux_scaled, 5)
+
+rf_grid <- grid_regular(mtry(c(3, 9)),
+                        min_n(c(2, 10)),
+                        trees(c(100, 500)),
+                        levels = 3)
+
+rf_spec <- rand_forest(mtry = tune(),
+                       min_n = tune(),
+                       trees = tune()) %>%
+  set_engine("ranger") %>%
+  set_mode("regression")
+
+aux_scaled_recipe <- recipe(drinking_days_past_30 ~ ., data = aux_scaled) |>
+  update_role(SEQN, new_role = "ID") 
+  # step_zv(all_predictors())  # removes zero-variance predictors ((DSALC12M))
+
+
+aux_scaled_rf_wflow <- workflow() %>%
+  add_model(rf_spec) %>%
+  add_recipe(aux_scaled_recipe)
+
+aux_scaled_rf_fit <- aux_scaled_rf_wflow %>%
+  tune_grid(
+    grid = rf_grid,
+    resamples = aux_scaled_cv
+    ) 
+
+```
+
+```{r}
+aux_scaled_rf_fit %>% 
+  collect_metrics()
+
+show_best(aux_scaled_rf_fit, metric = "rmse", n = 5)
+show_best(aux_scaled_rf_fit, metric = "rsq", n = 5)
+
+# best hyperparameters: mtry = 3, trees = 300, min_n = 10 
+```
+
+```{r}
+#| label: final-model-fit
+
+rf_mod_final_scaled <- rand_forest(
+  mtry = 3,
+  trees = 300,
+  min_n = 6) %>%
+  set_engine("ranger") %>%
+  set_mode("regression")
+
+aux_scaled_final <- workflow() %>%
+  add_model(rf_mod_final_scaled) %>%
+  add_recipe(aux_scaled_recipe) %>%
+  fit(aux_scaled)
+
+extract_fit_parsnip(aux_scaled_final) 
+```
+Scaling variables did not improve the model by too much
+
+## Super covariate - RCT
+
+```{r}
+rct <- rct |>
+  rename(SEQN = PATID)
+```
+
+
+```{r}
+# making predictions based on og model
+rct$pred <- predict(rf_mod_final_fit, new_data = rct)$.pred
+```
+
+```{r}
+rct <- rct |>
+  rename(PATID = SEQN)
+```
+
+```{r}
+rct <- rct |>
+  mutate(res = alcohol_16 - pred)
+
+1 - (var(rct$res)/var(rct$alcohol_16))
+```
+
+
+## Model Interpretation
+
+```{r}
+load(here("Data", "rf_mod_final_fit.RData"))
+```
+
+
+```{r}
+name_map <- c(
+  DEGENDER = "Gender",
+  DEEDUCTN_recode = "Education Level",
+  DEMARTL = "Marital Status",
+  MHCARDH = "Chest Pain History",
+  MHLIVRH = "Liver Condition History",
+  LANEUTRO = "Segmented Neutrophils",
+  LAHEMGLB = "Hemoglobin",
+  LAHEMATC = "Hematocrit %",
+  LAPLATES = "Platelet Count",
+  LAWBC = "White Blood Cell Count",
+  LARBC = "Red Blood Cell Count",
+  LAAST = "Aspartate Aminotransferase",
+  LAALT = "Alanine Aminotransferase",
+  VIHGTIN = "Height",
+  VIWTLBS = "Weight",
+  VIBPSYS1 = "Systolic Blood Pressure",
+  VIBPDIS1 = "Diastolic Blood Pressure",
+  DSALC12M = "Alcohol Use Past 12 Months",
+  DSTHC12M = "Cannabis Use Past 12 Months",
+  DSCOC12M = "Cocaine Use Past 12 Months",
+  TUSMK100 = "Ever Smoked 100 Cigarettes",
+  TU30DAYS = "Days Smoked Past 30 Days",
+  TUSTRTRG = "Age Started Smoking"
+)
+
+imp_data <- vi(extract_fit_parsnip(rf_mod_final_fit)$fit)
+
+imp_data <- imp_data %>%
+  mutate(Variable = recode(.data$Variable, !!!name_map))
+```
+
+```{r}
+ggplot(imp_data, aes(x = Importance, y = reorder(Variable, Importance))) +
+  geom_col(fill = "lightblue",
+           color = "black",
+           width = 1) +
+  labs(y = NULL, x = "Importance") +
+  theme_minimal()
+```
+
+```{r}
+ggplot(aux, aes(x = LARBC, y = drinking_days_past_30)) + 
+  geom_point(alpha = 0.5) + 
+  geom_smooth(method = "loess")
+
+```
+
