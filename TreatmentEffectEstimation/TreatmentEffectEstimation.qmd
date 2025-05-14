@@ -18,37 +18,6 @@ load(here("Data", "rct.RData"))
 
 Residuals Generator Function
 ```{r}
-get_residuals <- function(data, outcome, covariates, Z, tau, model) {
-  
-  # adjust outcome for treatment
-  Y_star <- data[[outcome]] - tau * data$Z
-  X <- data[, covariates]
-  
-  df <- cbind(Y_star = Y_star, X)
-
-  # fit model to adjusted outcome
-  if (model == "lm") {
-    fit <- lm(Y_star ~ ., data = df)
-    y_hat <- predict(fit)
-  } 
-  
-  else if (model == "rf") {
-    fit <- randomForest(X, Y_star)
-    y_hat <- predict(fit)
-  } 
-  
-  else {
-    stop("Unsupported model type")
-  }
-
-  # residuals from adjusted model
-  residuals <- Y_star - y_hat
-  return(residuals)
-}
-
-```
-
-```{r}
 get_residuals <- function(data, outcome, covariates, tau, model) {
   
   Y_star <- data[[outcome]] - tau * data[["Z"]]
@@ -79,14 +48,6 @@ get_residuals <- function(data, outcome, covariates, tau, model) {
 ```
 
 Wilcoxon Root Function
-```{r}
-myest_fun <- function(tau, data, outcome, covariates, Z, alpha = 0.05, model = "lm") {
-  adj_resid <- get_residuals(data, outcome, covariates, Z, tau, model)
-  pval <- wilcox.test(adj_resid ~ Z)$p.value
-  return(pval - alpha)
-}
-```
-
 ```{r}
 myest_fun <- function(tau, data, outcome, covariates, alpha = 0.05, model = "lm") {
   adj_resid <- get_residuals(data, outcome, covariates, tau, model)
