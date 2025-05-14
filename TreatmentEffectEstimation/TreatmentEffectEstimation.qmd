@@ -7,19 +7,361 @@ editor: visual
 ```{r}
 library(tidyverse)
 library(here)
+library(randomForest)
+```
+
+```{r}
+load(here("Data", "rct.RData"))
+```
+
+## Non-parametric Confidence Intervals
+
+Residuals Generator Function
+```{r}
+get_residuals <- function(data, outcome, covariates, Z, tau, model) {
+  
+  # adjust outcome for treatment
+  Y_star <- data[[outcome]] - tau * data$Z
+  X <- data[, covariates]
+  
+  df <- cbind(Y_star = Y_star, X)
+
+  # fit model to adjusted outcome
+  if (model == "lm") {
+    fit <- lm(Y_star ~ ., data = df)
+    y_hat <- predict(fit)
+  } 
+  
+  else if (model == "rf") {
+    fit <- randomForest(X, Y_star)
+    y_hat <- predict(fit)
+  } 
+  
+  else {
+    stop("Unsupported model type")
+  }
+
+  # residuals from adjusted model
+  residuals <- Y_star - y_hat
+  return(residuals)
+}
+
+```
+
+```{r}
+get_residuals <- function(data, outcome, covariates, tau, model) {
+  
+  Y_star <- data[[outcome]] - tau * data[["Z"]]
+  X <- data[, covariates]
+  df <- cbind(Y_star = Y_star, X)
+
+  # fit model to adjusted outcome
+  if (model == "lm") {
+    fit <- lm(Y_star ~ ., data = df)
+  } 
+  
+  else if (model == "rf") {
+    fit <- randomForest(X, Y_star)
+  } 
+  
+  else {
+    stop("Unsupported model type")
+  }
+
+  # predict from fitted model
+  y_hat <- predict(fit)  
+
+  # residuals
+  residuals <- Y_star - y_hat
+  return(residuals)
+}
+
+```
+
+Wilcoxon Root Function
+```{r}
+myest_fun <- function(tau, data, outcome, covariates, Z, alpha = 0.05, model = "lm") {
+  adj_resid <- get_residuals(data, outcome, covariates, Z, tau, model)
+  pval <- wilcox.test(adj_resid ~ Z)$p.value
+  return(pval - alpha)
+}
+```
+
+```{r}
+myest_fun <- function(tau, data, outcome, covariates, alpha = 0.05, model = "lm") {
+  adj_resid <- get_residuals(data, outcome, covariates, tau, model)
+  pval <- wilcox.test(adj_resid ~ data$Z)$p.value
+  return(pval - alpha)
+}
 ```
 
 
 ```{r}
-rct <- read_csv(
-  here("Data", "rct.csv")
-)
+# changing treatment column to numeric
+rct$Z <- ifelse(rct$TRTTRUE == "XR-NTX", 1, 0)
 ```
 
-## Wilcoxon Rank Sum with y (No covariate Adjustment)
-
+CI No Covariate Adjustment
 ```{r}
 wilcox.test(alcohol_16 ~ TRTTRUE,
-            data = rct)
+            data = rct,
+            conf.int = TRUE)
 ```
+
+```{r}
+myest_fun_adj<- function(tau, data, outcome, alpha) {
+  shifted_outcome <- data[[outcome]] - tau * data$Z
+  pval <- wilcox.test(shifted_outcome ~ data$Z, exact = FALSE)$p.value
+  return(pval - alpha)
+}
+```
+
+```{r}
+# sanity check
+outcome = "alcohol_16"
+Z <- rct$Z
+
+lower_bound <- uniroot(myest_fun_adj, interval = c(-50, 0),
+                       data = rct, outcome = outcome, alpha = 0.05)$root
+upper_bound <- uniroot(myest_fun_adj, interval = c(0, 50),
+                       data = rct, outcome = outcome, alpha = 0.05)$root
+
+CI <- c(lower_bound, upper_bound)
+CI
+```
+
+
+CI with Pretest
+```{r}
+outcome <- "alcohol_16"
+covariates <- "alcohol_S2"
+
+lower_bound <- uniroot(myest_fun, interval = c(-10, 0), data = rct,
+                       outcome = outcome, covariates = covariates, 
+                       model = "lm")$root
+
+upper_bound <- uniroot(myest_fun, interval = c(0, 10), data = rct,
+                       outcome = outcome, covariates = covariates,
+                       model = "lm")$root
+
+CI <- c(lower_bound, upper_bound)
+CI
+```
+
+
+
+
+
+
+CI with all covariates (RCT)
+```{r}
+set.seed(123)
+
+outcome <- "alcohol_16"
+covariates <- c(
+  "alcohol_S2", "DEGENDER", "DEEDUCTN_recode", "DEMARTL", "MHCARDH", "MHLIVRH",
+  "LANEUTRO", "LAHEMGLB", "LAHEMATC", "LAPLATES", "LAWBC", "LARBC", "LAAST", "LAALT",
+  "VIHGTIN", "VIWTLBS", "VIBPSYS1", "VIBPDIS1", "DSALC12M", "DSTHC12M", "DSCOC12M",
+  "TUSMK100", "TUSTRTRG", "TU30DAYS"
+)
+
+lower_bound <- uniroot(myest_fun, interval = c(-10, 0), data = rct,
+                       outcome = outcome, covariates = covariates,
+                       model = "rf")$root
+
+upper_bound <- uniroot(myest_fun, interval = c(0, 10), data = rct,
+                       outcome = outcome, covariates = covariates,
+                       model = "rf")$root
+
+CI <- c(lower_bound, upper_bound)
+CI
+```
+
+CI with "super covariate"
+```{r}
+outcome <- "alcohol_16"
+covariates <- "pred"
+Z <- rct$Z
+
+lower_bound <- uniroot(myest_fun, interval = c(-10, 0), data = rct,
+                       outcome = outcome, covariates = covariates,
+                       model = "lm")$root
+
+upper_bound <- uniroot(myest_fun, interval = c(0, 10), data = rct,
+                       outcome = outcome, covariates = covariates,
+                       model = "lm")$root
+
+CI <- c(lower_bound, upper_bound)
+CI
+```
+
+
+## Poisson Regression
+```{r}
+# no covariates
+fit1 <- glm(alcohol_16 ~ Z, data = rct, family = poisson())
+
+# pretest
+fit2 <- glm(alcohol_16 ~ Z + alcohol_S2, data = rct, family = poisson())
+
+# super cov
+fit3 <- glm(alcohol_16 ~ Z + offset(log(pred)), data = rct, family = poisson())
+
+
+confint(fit1)["Z", ]
+confint(fit2)["Z", ]
+confint(fit3)["Z", ]
+```
+
+
+## scratch
+```{r}
+# no covariates
+fit1 <- lm(alcohol_16 ~ Z, data = rct)
+
+# pretest
+fit2 <- lm(alcohol_16 ~ Z +alcohol_S2, data = rct)
+
+rct <- rct |>
+  mutate(res = alcohol_16 - pred)
+
+# super cov
+fit3 <- lm(res ~ Z, data = rct)
+
+
+confint(fit1)["Z", ]
+confint(fit2)["Z", ]
+confint(fit3)["Z", ]
+```
+
+```{r}
+summary(lm(alcohol_S2 ~ TRTTRUE, data = rct))
+```
+
+```{r}
+get_r_squared <- function(data, outcome, covariates, Z, tau, model) {
+  
+  # adjust outcome for treatment
+  Y_star <- data[[outcome]] - tau * Z
+  X <- data[, covariates]
+
+  # fit model to adjusted outcome
+  if (model == "lm") {
+    fit <- lm(Y_star ~ ., data = X)
+    y_hat <- predict(fit, newdata = X)
+  } 
+  
+  else if (model == "rf") {
+    fit <- randomForest(X, Y_star)
+    y_hat <- predict(fit, newdata = X)
+  } 
+  
+  else {
+    stop("Unsupported model type")
+  }
+
+  ss_res <- sum((Y_star - y_hat)^2)
+  ss_tot <- sum((Y_star - mean(Y_star))^2)
+  r_squared <- 1 - (ss_res / ss_tot)
+
+  return(r_squared)
+}
+```
+
+
+## Plots
+
+```{r}
+tau_grid <- seq(-10, 10, by = 0.1)
+```
+
+
+Pretest
+```{r}
+covariates <- "alcohol_S2"
+r_squared_vals <- sapply(tau_grid, function(tau_val) {
+  get_r_squared(
+    data = rct,
+    outcome = outcome,
+    covariates = covariates,
+    Z = Z,
+    tau = tau_val,
+    model = "lm"
+  )
+})
+
+df_pretest <- data.frame(r_squared_vals)
+
+ggplot(df_pretest, aes(x = r_squared_vals)) +
+  geom_histogram(bins = 30, fill = "lightblue", color = "black") +
+  labs(
+    title = expression("Pretest Adjustment Model: Distribution of " ~ R^2 ~ " over candidate " ~ tau ~ " values"),
+    x = expression(R^2),
+    y = "Count"
+  ) +
+  theme_minimal()
+```
+
+All covs
+```{r}
+covariates <- c(
+  "alcohol_S2", "DEGENDER", "DEEDUCTN_recode", "DEMARTL", "MHCARDH", "MHLIVRH",
+  "LANEUTRO", "LAHEMGLB", "LAHEMATC", "LAPLATES", "LAWBC", "LARBC", "LAAST", "LAALT",
+  "VIHGTIN", "VIWTLBS", "VIBPSYS1", "VIBPDIS1", "DSALC12M", "DSTHC12M", "DSCOC12M",
+  "TUSMK100", "TUSTRTRG", "TU30DAYS"
+)
+
+r_squared_vals <- sapply(tau_grid, function(tau_val) {
+  get_r_squared(
+    data = rct,
+    outcome = outcome,
+    covariates = covariates,
+    Z = Z,
+    tau = tau_val,
+    model = "rf"
+  )
+})
+
+df_all_covariates <- data.frame(r_squared_vals)
+
+ggplot(df_all_covariates, aes(x = r_squared_vals)) +
+  geom_histogram(bins = 30, fill = "lightblue", color = "black") +
+  labs(
+    title = expression("All Covariates (RCT) Model: Distribution of " ~ R^2 ~ " over candidate " ~ tau ~ " values"),
+    x = expression(R^2),
+    y = "Count"
+  ) +
+  theme_minimal()
+
+```
+
+Aux Pred
+```{r}
+covariates <- "pred"
+r_squared_vals <- sapply(tau_grid, function(tau_val) {
+  get_r_squared(
+    data = rct,
+    outcome = outcome,
+    covariates = covariates,
+    Z = Z,
+    tau = tau_val,
+    model = "lm"
+  )
+})
+
+df_aux_model <- data.frame(r_squared_vals)
+
+ggplot(df_aux_model, aes(x = r_squared_vals)) +
+  geom_histogram(bins = 30, fill = "lightblue", color = "black") +
+  labs(
+    title = expression("Auxiliary Prediction Model: Distribution of " ~ R^2 ~ " over candidate " ~ tau ~ " values"),
+    x = expression(R^2),
+    y = "Count"
+  ) +
+  theme_minimal()
+
+```
+
+
+
 

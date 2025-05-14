@@ -18,41 +18,68 @@ alc_aux <- read_xpt(
 ```
 
 ```{r}
-# new variable reflicts drinking frequency per year
+# # new variable reflicts drinking frequency per year
+# alc_aux <- alc_aux |>
+#   mutate(
+#     # Estimate number of drinking days in past 30 days
+#     drinking_days_past_30 = case_when(
+#       ALQ120U == 1 ~ ALQ120Q * 4.345,  # Weekly drinking converted to monthly
+#       ALQ120U == 2 ~ ALQ120Q,          # Monthly drinking remains as is
+#       ALQ120U == 3 ~ ALQ120Q / 12,     # Yearly drinking converted to monthly
+#       TRUE ~ NA_real_                   # Assign NA if data is missing
+#     ),
+# 
+#     # Assign NA if person was not asked the alcohol use questions
+#     drinking_days_past_30 = case_when(
+#       ALQ101 == 2 ~ NA_real_,  # Never drank in any year → NA
+#       ALQ101 %in% c(7, 9) ~ NA_real_,  # Refused or Don't know → NA
+#       ALQ120Q %in% c(777, 999) ~ NA_real_,  # Refused or Don't know in ALQ120Q → NA
+#       TRUE ~ drinking_days_past_30
+#     ),
+#     
+#     # temp var - Calculate annual frequency of alcohol consumption
+#     annual_drinking_days = case_when(
+#       ALQ120U == 1 ~ ALQ120Q * 52,    # Weekly: 52 weeks per year
+#       ALQ120U == 2 ~ ALQ120Q * 12,    # Monthly: 12 months per year
+#       ALQ120U == 3 ~ ALQ120Q,         # Yearly: already per year
+#       TRUE ~ 0                        # Default to 0 if not specified
+#     ),
+#     
+#     # new binary variable for alcohol
+#     ALQ120_binary = case_when(
+#       ALQ101 == 1 & annual_drinking_days > 0 ~ 1,  # Drank in the past year
+#       ALQ101 == 1 & annual_drinking_days == 0 ~ 0, # Did not drink in the past year
+#       ALQ101 == 2 ~ 0,                             # Never had 12 drinks in any year
+#       ALQ101 %in% c(7, 9) ~ NA_real_,              # Refused or Don't know
+#       TRUE ~ NA_real_                              # Catch-all for any other cases
+#     )
+#   )
+# 
+# alc_names <- c("drinking_days_past_30", "ALQ120_binary")
+```
+
+```{r}
 alc_aux <- alc_aux |>
   mutate(
-    # Estimate number of drinking days in past 30 days
-    drinking_days_past_30 = case_when(
-      ALQ120U == 1 ~ ALQ120Q * 4.345,  # Weekly drinking converted to monthly
-      ALQ120U == 2 ~ ALQ120Q,          # Monthly drinking remains as is
-      ALQ120U == 3 ~ ALQ120Q / 12,     # Yearly drinking converted to monthly
-      TRUE ~ NA_real_                   # Assign NA if data is missing
-    ),
-
-    # Assign NA if person was not asked the alcohol use questions
-    drinking_days_past_30 = case_when(
-      ALQ101 == 2 ~ NA_real_,  # Never drank in any year → NA
-      ALQ101 %in% c(7, 9) ~ NA_real_,  # Refused or Don't know → NA
-      ALQ120Q %in% c(777, 999) ~ NA_real_,  # Refused or Don't know in ALQ120Q → NA
-      TRUE ~ drinking_days_past_30
-    ),
-    # temp var - Calculate annual frequency of alcohol consumption
-    annual_drinking_days = case_when(
-      ALQ120U == 1 ~ ALQ120Q * 52,    # Weekly: 52 weeks per year
-      ALQ120U == 2 ~ ALQ120Q * 12,    # Monthly: 12 months per year
-      ALQ120U == 3 ~ ALQ120Q,         # Yearly: already per year
-      TRUE ~ 0                        # Default to 0 if not specified
-    ),
-    
-    # new binary variable for alcohol
     ALQ120_binary = case_when(
-      ALQ101 == 1 & annual_drinking_days > 0 ~ 1,  # Drank in the past year
-      ALQ101 == 1 & annual_drinking_days == 0 ~ 0, # Did not drink in the past year
-      ALQ101 == 2 ~ 0,                             # Never had 12 drinks in any year
-      ALQ101 %in% c(7, 9) ~ NA_real_,              # Refused or Don't know
-      TRUE ~ NA_real_                              # Catch-all for any other cases
-    )
-  )
+      ALQ120U >= 0 & ALQ120U <= 365 ~ 1,
+      is.na(ALQ120U) & ALQ101 == 1 ~ 1,
+      is.na(ALQ120U) & ALQ101 == 2 ~ 0,
+      is.na(ALQ120U) & is.na(ALQ101) & ALQ110 == 1 ~ 0,
+      is.na(ALQ120U) & is.na(ALQ101) & ALQ110 == 2 ~ 0,
+      TRUE ~ NA_real_                
+    ) 
+  ) |>
+  mutate(
+    drinking_days_past_30 = case_when(
+      ALQ120_binary == 0 ~ 0,  # no drinking in the past year → 0 days
+      ALQ120U == 1 ~ ALQ120Q * 4.345,
+      ALQ120U == 2 ~ ALQ120Q,
+      ALQ120U == 3 ~ ALQ120Q / 12,
+      TRUE ~ NA_real_
+      )
+  ) |>
+  filter(!is.na(ALQ120_binary), !is.na(drinking_days_past_30))
 
 alc_names <- c("drinking_days_past_30", "ALQ120_binary")
 ```
@@ -69,12 +96,29 @@ blood_names <- c("LBDNENO", "LBXHGB", "LBXHCT", "LBXPLTSI", "LBXWBCSI",
 cardio_aux <- read_xpt(
   here("Data", "NHANES", "2015-2016", "Questionnaire", "CDQ_I.xpt"))
 
+cardio_aux <- cardio_aux |>
+  mutate(
+    CDQ001 = case_when(
+      CDQ001 == 2 ~ 0,
+      TRUE ~ CDQ001
+    ) 
+  ) 
+
 cardio_names <- "CDQ001"
 ```
 
 ```{r}
 medcond_aux <- read_xpt(
   here("Data", "NHANES", "2015-2016", "Questionnaire", "MCQ_I.xpt"))
+
+medcond_aux <- medcond_aux |>
+  mutate(
+    MCQ160L = case_when(
+      MCQ160L == 2 ~ 0,
+      TRUE ~ MCQ160L
+    ) 
+  ) |>
+  filter(MCQ160L != 9)
 
 medcond_names <- "MCQ160L"
 ```
@@ -111,6 +155,15 @@ bp_names <- c("BPXSY_avg", "BPXDI_avg")
 ```{r}
 smoking_aux <- read_xpt(
   here("Data", "NHANES", "2015-2016", "Questionnaire", "SMQ_I.xpt"))
+
+smoking_aux <- smoking_aux |>
+  mutate(
+    SMQ020 = case_when(
+      SMQ020 == 2 ~ 0,
+      TRUE ~ SMQ020
+    ) 
+  ) |>
+  filter(!SMQ020 %in% c(7, 9))
 
 smoking_names <- c("SMQ020", "SMD030", "SMD641")
 ```
@@ -189,7 +242,57 @@ aux <- alc_aux |>
     all_of(smoking_names),
     all_of(drug_names),
     all_of(demo_names))
+```
+
+## Additional data cleaning to clean up NA's
+
+```{r}
+vars_0 <- c("SMD030", "SMD641", "DUQ215_binary", "DUQ270_binary")
+
+vars_median <- c("LBDNENO", "LBXHGB", "LBXHCT", "LBXPLTSI", "LBXWBCSI",
+                 "LBXRBCSI", "LBXSASSI", "LBXSATSI", "BPXSY_avg", "BPXDI_avg")
 
 aux <- aux |>
-  filter(!is.na(drinking_days_past_30))
+  mutate(across(all_of(vars_0), ~replace_na(.x, 0))) |>
+  mutate(across(all_of(vars_median), ~ifelse(is.na(.), median(., na.rm = TRUE), .)))
+  
 ```
+
+## Rename variables to match RCT
+
+```{r}
+name_mapping <- c(
+  "RIAGENDR" = "DEGENDER",
+  "DMDEDUC2" = "DEEDUCTN_recode",
+  "DMDMARTL" = "DEMARTL",
+  "CDQ001"   = "MHCARDH",
+  "MCQ160L"  = "MHLIVRH",
+  "LBDNENO"  = "LANEUTRO",
+  "LBXHGB"   = "LAHEMGLB",
+  "LBXHCT"   = "LAHEMATC",
+  "LBXPLTSI" = "LAPLATES",
+  "LBXWBCSI" = "LAWBC",
+  "LBXRBCSI" = "LARBC",
+  "LBXSASSI" = "LAAST",
+  "LBXSATSI" = "LAALT",
+  "WHD010"   = "VIHGTIN",
+  "WHD020"   = "VIWTLBS",
+  "BPXSY_avg" = "VIBPSYS1",
+  "BPXDI_avg" = "VIBPDIS1",
+  "ALQ120_binary" = "DSALC12M",
+  "DUQ215_binary" = "DSTHC12M",
+  "DUQ270_binary" = "DSCOC12M",
+  "SMQ020" = "TUSMK100",
+  "SMD030" = "TUSTRTRG",
+  "SMD641" = "TU30DAYS"
+)
+
+aux <- aux %>%
+  rename_with(~ name_mapping[.x], .cols = all_of(names(name_mapping)))
+```
+
+
+```{r}
+#save(aux, file = "aux.RData")
+```
+

@@ -102,3 +102,96 @@ treatment_data |>
   summarize(mean = mean(LACD4CNT, na.rm = TRUE))
 
 ```
+
+## Archive of other code (4/15/25)
+
+## Average Treatment Effect (ATE)
+```{r}
+myest_fun <- function(tau, residuals, Z, alpha = 0.05) {
+  adj_resid <- residuals - tau * Z # will be replaced by new function
+  pval <- wilcox.test(adj_resid ~ Z)$p.value
+  return(pval - alpha)
+}
+```
+
+```{r}
+# changing treatment column to numeric
+rct$Z <- ifelse(rct$TRTTRUE == "XR-NTX", 1, 0)
+```
+
+
+Wilcoxon Rank sum test with Pretest
+```{r}
+lower_bound <- uniroot(myest_fun, interval = c(-10, 0), residuals = residuals_pretest, Z = rct$Z)$root
+upper_bound <- uniroot(myest_fun, interval = c(0, 10), residuals = residuals_pretest, Z = rct$Z)$root
+
+CI_pretest <- c(lower_bound, upper_bound)
+CI_pretest
+```
+
+Wilcoxon Rank sum test with all covariates (RCT)
+```{r}
+lower_bound <- uniroot(myest_fun, interval = c(-10, 0), residuals = rct$residuals_rf, Z = rct$Z)$root
+upper_bound <- uniroot(myest_fun, interval = c(0, 10), residuals = rct$residuals_rf, Z = rct$Z)$root
+
+CI_rf <- c(lower_bound, upper_bound)
+CI_rf
+```
+
+
+## more archive
+## Wilcoxon Rank Sum with y (No covariate Adjustment)
+```{r}
+wilcox.test(alcohol_16 ~ TRTTRUE,
+            data = rct)
+```
+
+## Wilcoxon Rank sum test with Pretest
+
+```{r}
+model_pretest <- lm(alcohol_16 ~ alcohol_S2, 
+                    data = rct)
+
+# side note: only OK if computing residuals under assumption that tau is 0
+residuals_pretest <- model_pretest$residuals 
+
+wilcox.test(residuals_pretest ~ rct$TRTTRUE)
+```
+
+```{r}
+summary(model_pretest)
+```
+
+## Wilcoxon Rank sum test with all covariates (RCT)
+
+```{r}
+set.seed(123)
+
+model_all <- randomForest(alcohol_16 ~ alcohol_S2 + DEGENDER + DEEDUCTN_recode +
+DEMARTL + MHCARDH + MHLIVRH + LANEUTRO + LAHEMGLB + LAHEMATC+ LAPLATES + LAWBC +
++ LARBC + LAAST + LAALT + VIHGTIN + VIWTLBS + VIBPSYS1 + VIBPDIS1 + DSALC12M +
+DSTHC12M + DSCOC12M + TUSMK100 + TUSTRTRG + TU30DAYS,
+data = rct)
+
+rct$residuals_rf <- rct$alcohol_16 - predict(model_all, rct)
+
+# Perform Wilcoxon Rank Sum test on residuals
+wilcox.test(residuals_rf ~ TRTTRUE, data = rct)
+```
+
+
+```{r}
+print(model_all)
+```
+
+```{r}
+predictions <- predict(model_all, rct)
+
+rss <- sum((rct$alcohol_16 - predictions)^2)  
+tss <- sum((rct$alcohol_16 - mean(rct$alcohol_16))^2)  
+r_squared <- 1 - (rss/tss)
+r_squared
+
+rss / 45
+tss 
+```

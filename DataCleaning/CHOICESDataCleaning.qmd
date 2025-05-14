@@ -15,22 +15,49 @@ library(here)
 demo_rct <- read_csv(
   here("Data", "CHOICES", "RCT", "DEM.csv"))
 
-demo_rct <- demo_rct |>
+demo_rct[, 4:34] <- lapply(demo_rct[, 4:34], as.numeric)
+
+# Calculate mode of DEEEDUCN (excluding 98 and NAs)
+mode_val <- demo_rct %>%
+  filter(!DEEDUCTN %in% c(97, 98), !is.na(DEEDUCTN)) %>%
+  count(DEEDUCTN) %>%
+  arrange(desc(n)) %>%
+  slice(1) %>%
+  pull(DEEDUCTN)
+
+# Mutate with recoding, using mode_val for 98
+demo_rct <- demo_rct %>%
   mutate(
     DEGENDER = as.factor(DEGENDER),
     DEEDUCTN_recode = case_when(
-      DEEDUCTN %in% c(5, 6, 7, 8) ~ 1,  # Less than 9th grade (5th-8th grade)
-      DEEDUCTN %in% c(9, 10, 11, 12) ~ 2, # 9-12th grade, no diploma
-      DEEDUCTN %in% c(13, 14) ~ 3,  # High school graduate / GED
-      DEEDUCTN %in% c(15, 16, 17) ~ 4,  # Some college or AA degree
-      DEEDUCTN == 18 ~ 5,  # College graduate or above
-      DEEDUCTN %in% c(19, 20, 21) ~ 5,  # Advanced degrees (Master’s, Professional, Doctorate)
-      DEEDUCTN == 97 ~ 9,  # Don't know
-      DEEDUCTN == 98 ~ 7,  # Refused
-      TRUE ~ NA_real_  # Default to NA for any unexpected cases
-    ),
-    
+      DEEDUCTN %in% c(5, 6, 7, 8)      ~ 1,  # Less than 9th grade
+      DEEDUCTN %in% c(9, 10, 11, 12)   ~ 2,  # 9–12th grade, no diploma
+      DEEDUCTN %in% c(13, 14)          ~ 3,  # High school grad
+      DEEDUCTN %in% c(15, 16, 17)      ~ 4,  # Some college / AA
+      DEEDUCTN == 18                   ~ 5,  # College grad
+      DEEDUCTN %in% c(19, 20, 21)      ~ 5,  # Advanced degree
+      DEEDUCTN == 97                   ~ 9,  # Don't know
+      DEEDUCTN == 98                   ~ mode_val, # Refused → mode
+      DEEDUCTN == 4                    ~ mode_val, # Value was four for some reason
+      TRUE                             ~ NA_real_  # Everything else
+    )
   )
+
+mode_martl <- demo_rct %>%
+  filter(DEMARTL != 98, !is.na(DEMARTL)) %>%
+  count(DEMARTL) %>%
+  arrange(desc(n)) %>%
+  slice(1) %>%
+  pull(DEMARTL)
+
+demo_rct <- demo_rct %>%
+  mutate(
+    DEMARTL = case_when(
+      DEMARTL == 98 ~ mode_martl,
+      TRUE ~ DEMARTL
+    )
+  )
+
 
 demo_names <- c("DEGENDER", "DEEDUCTN_recode", "DEMARTL")
 ```
@@ -51,7 +78,8 @@ lab_rct <- read_csv(
 
 # took lab at before treatment time
 lab_rct <- lab_rct |>
-  filter(VISNO == "S1")
+  filter(VISNO == "S1") |>
+  mutate(LAHEMATC = ifelse(is.na(LAHEMATC), round(mean(LAHEMATC, na.rm = TRUE), 2), LAHEMATC))
 
 lab_names <- c("LANEUTRO", "LAHEMGLB", "LAHEMATC", "LAPLATES", "LAWBC", "LARBC", 
                "LAAST", "LAALT")
@@ -84,7 +112,11 @@ tuh_rct <- read_csv(
 
 tuh_rct <- tuh_rct |>
   filter(VISNO == "S2") |>
-  mutate(across(c(TUSMK100), as.factor))
+  mutate(across(c(TUSMK100), as.factor),
+         ## replacing TUSTRTRG and TU30DAYS with 0 values - makes most sense
+         TUSTRTRG = ifelse(is.na(TUSTRTRG), 0, TUSTRTRG),
+         TU30DAYS = ifelse(is.na(TU30DAYS), 0, TU30DAYS)
+         ) 
 
 tuh_names <- c("TUSMK100", "TUSTRTRG", "TU30DAYS")
 ```
@@ -96,6 +128,7 @@ asd_rct <- read_csv(
 
 asd_names <- c("VISNO", "ADALA30D")
 ```
+
 ```{r}
 ## treatment type
 
@@ -105,7 +138,6 @@ enroll_rct <- read_csv(
 
 enroll_names <- "TRTTRUE"
 ```
-
 
 ```{r}
 rct <- demo_rct |>
@@ -153,3 +185,8 @@ rct <- asd_rct |>
   select(PROT, PATID, SITE, RANDDT, TRTTRUE, alcohol_S2, alcohol_16, everything())
 
 ```
+
+```{r}
+#save(rct, file = "rct.RData")
+```
+
